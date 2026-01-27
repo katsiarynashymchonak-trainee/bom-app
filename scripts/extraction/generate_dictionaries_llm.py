@@ -9,11 +9,10 @@ import re
 
 # Импорт путей и настроек проекта
 from scripts.config import (
-    DICT_DIR,
     OLLAMA_URL,
     OLLAMA_MODEL,
     DESCRIPTIONS_PATH,
-    GENERATE_DICT
+    GENERATE_DICT, CREATE_ABBREV_MAPS, NORM_DICTS, MATERIAL_RAW, SIZES_RAW, STANDARD_RAW, VENDOR_RAW, COMPONENT_RAW
 )
 
 # Базовые директории скрипта
@@ -33,6 +32,55 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     encoding="utf-8"
 )
+
+
+# Функция для запуска дочерних скриптов с выводом stdout/stderr
+def run_script(path):
+    print(f"\n=== Running {path} ===\n")
+    result = subprocess.run(
+        ["python", path],
+        text=True,
+        capture_output=True
+    )
+    print(result.stdout)
+    print(result.stderr)
+    if result.returncode != 0:
+        print(f"ERROR in {path}: {result.returncode}")
+    print(f"=== Finished {path} ===\n")
+
+
+# Блок нормализации ключей результата
+def normalize_result_keys(data):
+    target = {
+        "materials": [],
+        "sizes": [],
+        "standards": [],
+        "vendors": [],
+        "component_types": []
+    }
+
+    if not isinstance(data, dict):
+        return target
+
+    aliases = {
+        "materials": ["material", "mats", "mat"],
+        "sizes": ["size", "dimension", "dimensions", "dims"],
+        "standards": ["standard", "std", "spec", "specs"],
+        "vendors": ["vendor", "maker", "manufacturers"],
+        "component_types": ["types", "type", "components", "component", "comp_types"]
+    }
+
+    for canonical, keys in aliases.items():
+        if canonical in data and isinstance(data[canonical], list):
+            target[canonical] = data[canonical]
+            continue
+
+        for alias in keys:
+            if alias in data and isinstance(data[alias], list):
+                target[canonical] = data[alias]
+                break
+
+    return target
 
 
 # Блок извлечения JSON из произвольного текста
@@ -150,18 +198,7 @@ Component type examples:
 ACTUATOR, ADAPTER, ANGLE, ASSEMBLY, BEARING, BLADE, BOLT, BOLTING, BRACKET,
 BUSHING, BUSH, CAPSCREW, CASE, CASING, COLLAR, CONNECTOR, COUPLING, COVER,
 CYLINDER, DRAIN, ELBOW, FITTING, FLANGE, GASKET, GAUGE, GAUGEBOARD, GOVERNOR,
-HANDLE, HARDWARE, HOUSING, INLET, KEY, LABYRINTH, LEAKOFF, LEVER, LINKAGE,
-LOCKNUT, LOCKWASHER, LUBRICATION, MOUNTING, NAMEPLATE, NIPPLE, NOZZLE, NUT,
-ORIFICE, PACKING, PIPE, PIPEGUARD, PIPEPLUG, PIPING, PUMP, REDUCER, RING,
-ROLLPIN, ROTATION, ROTOR, SCREW, SEAL, SEALANT, SECTOR, SETSCREW, SHAFT,
-SHROUDBAND, SHSS, SIPHON, SOLENOID, SOLEPLATE, SPACER, SPRING, STEM, STUD,
-TACHOMETER, TAPPET, TEE, THERMOMETER, THROTTLE, TRIP, TRUNNION, TURBINE, TURB,
-UNION, VALVE, WASHER, WHEEL, BODY, BONNET, GEAR, BOX, BUCKET, BUMPER, CAGE,
-BORD, CIRC, CLAPPER, CONDENSER, EJECTOR, TRANSFORMER, CONTROLLER, ENCLOSURE,
-EYEBOLT, STUB, COOLER, LUBE, PINION, SPUR, GLAND, PIN, INDICATOR, IMPELLER,
-BLANKET, SWITCH, PURGE, PRESS, PORT, SOFTWARE, TRANSDUCER, SENSOR, PROBE,
-STK, SCREEN, SEAT, SET, SIGNAL, SILENCER, VENT, SLEEVE, THRUST, TUBE,
-VELOMITOR, TRANSMITTER, WARNING, WATER COOL.
+HANDLE, HARDWARE, HOUSING, INLET, KEY, LABYRINTH, LEAKOFF, LEVER, LINKAGE....
 
 Return STRICT JSON:
 {{
@@ -199,11 +236,11 @@ Text:
 
     data = extract_json(buffer)
     if isinstance(data, dict):
-        return data
+        return normalize_result_keys(data)
 
     repaired = repair_json_with_llm(buffer)
     if isinstance(repaired, dict):
-        return repaired
+        return normalize_result_keys(repaired)
 
     logging.warning("Failed to extract JSON even after repair")
     return {
@@ -244,16 +281,18 @@ def save_yaml(path, key, values):
 
 # Блок основного пайплайна
 def main():
-    logging.info("=== Dictionary generation started ===")
-    print("=== Dictionary generation started ===")
 
-    materials = load_yaml_set(os.path.join(DICT_DIR, "materials.yaml"), "materials")
-    sizes = load_yaml_set(os.path.join(DICT_DIR, "sizes.yaml"), "sizes")
-    standards = load_yaml_set(os.path.join(DICT_DIR, "standards.yaml"), "standards")
-    vendors = load_yaml_set(os.path.join(DICT_DIR, "vendors.yaml"), "vendors")
-    component_types = load_yaml_set(os.path.join(DICT_DIR, "component_types.yaml"), "component_types")
+
+    materials = load_yaml_set(MATERIAL_RAW, "materials")
+    sizes = load_yaml_set(SIZES_RAW, "sizes")
+    standards = load_yaml_set(STANDARD_RAW, "standards")
+    vendors = load_yaml_set(VENDOR_RAW, "vendors")
+    component_types = load_yaml_set(COMPONENT_RAW, "component_types")
 
     if GENERATE_DICT:
+        logging.info("=== Dictionary generation started ===")
+        print("=== Dictionary generation started ===")
+
         df = pd.read_csv(DESCRIPTIONS_PATH, dtype=str)
         descriptions = df.iloc[:, 1].dropna().astype(str).tolist()
         total = len(descriptions)
@@ -271,28 +310,31 @@ def main():
             vendors |= set(result["vendors"])
             component_types |= set(result["component_types"])
 
-            save_yaml(os.path.join(DICT_DIR, "materials.yaml"), "materials", materials)
-            save_yaml(os.path.join(DICT_DIR, "sizes.yaml"), "sizes", sizes)
-            save_yaml(os.path.join(DICT_DIR, "standards.yaml"), "standards", standards)
-            save_yaml(os.path.join(DICT_DIR, "vendors.yaml"), "vendors", vendors)
-            save_yaml(os.path.join(DICT_DIR, "component_types.yaml"), "component_types", component_types)
+            save_yaml(MATERIAL_RAW, "materials", materials)
+            save_yaml(SIZES_RAW, "sizes", sizes)
+            save_yaml(STANDARD_RAW, "standards", standards)
+            save_yaml(VENDOR_RAW, "vendors", vendors)
+            save_yaml(COMPONENT_RAW, "component_types", component_types)
 
         logging.info("Dictionary generation complete")
-
         print("Dictionary generation complete")
 
-        subprocess.run(["python", os.path.join(ABBREV_DIR, "build_vendor_abbrev_map.py")])
-        subprocess.run(["python", os.path.join(ABBREV_DIR, "build_standard_abbrev_map.py")])
-        subprocess.run(["python", os.path.join(ABBREV_DIR, "build_component_abbrev_map.py")])
-        subprocess.run(["python", os.path.join(ABBREV_DIR, "build_material_abbrev_map.py")])
+    if CREATE_ABBREV_MAPS:
+        # Запуск всех build_* с выводом stdout/stderr
+        run_script(os.path.join(ABBREV_DIR, "build_vendor_abbrev_map.py"))
+        run_script(os.path.join(ABBREV_DIR, "build_standard_abbrev_map.py"))
+        run_script(os.path.join(ABBREV_DIR, "build_component_abbrev_map.py"))
+        run_script(os.path.join(ABBREV_DIR, "build_material_abbrev_map.py"))
 
-    subprocess.run(["python", os.path.join(NORM_DIR, "normalize_vendors.py")])
-    subprocess.run(["python", os.path.join(NORM_DIR, "normalize_standards.py")])
-    subprocess.run(["python", os.path.join(NORM_DIR, "normalize_component_types.py")])
-    subprocess.run(["python", os.path.join(NORM_DIR, "normalize_materials.py")])
+    if NORM_DICTS:
+        # Запуск нормализации
+        run_script(os.path.join(NORM_DIR, "normalize_vendors.py"))
+        run_script(os.path.join(NORM_DIR, "normalize_standards.py"))
+        run_script(os.path.join(NORM_DIR, "normalize_component_types.py"))
+        run_script(os.path.join(NORM_DIR, "normalize_materials.py"))
 
-    logging.info("All dictionaries normalized")
-    print("All dictionaries normalized")
+        logging.info("All dictionaries normalized")
+        print("All dictionaries normalized")
 
 
 if __name__ == "__main__":

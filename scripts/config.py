@@ -1,7 +1,10 @@
+# bom_app/scripts/config.py
 import os
 
 # Основные настройки
-GENERATE_DICT = True
+GENERATE_DICT = False
+CREATE_ABBREV_MAPS = False
+NORM_DICTS = True
 
 # Базовые директории
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -11,11 +14,19 @@ DICT_DIR = os.environ.get("DICT_DIR", os.path.join(ROOT_DIR, "dictionaries"))
 # Путь к файлу уникальных описаний
 DESCRIPTIONS_PATH = os.environ.get("DESCRIPTIONS_PATH", os.path.join(DICT_DIR, "unique_descriptions.csv"))
 
+# Пути к папкам с данными
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(ROOT_DIR, "data"))
+CHROMA_DIR = os.environ.get("CHROMA_DIR", os.path.join(DATA_DIR, "chroma"))
+RAW_DATA_DIR = os.environ.get("RAW_DATA_DIR", os.path.join(DATA_DIR, "raw"))
+PROCESSED_DATA_DIR = os.environ.get("PROCESSED_DATA_DIR", os.path.join(DATA_DIR, "processed"))
+
+
 # Пути к raw‑данным
 COMPONENT_RAW = os.environ.get("COMPONENT_RAW", os.path.join(DICT_DIR, "component_types.yaml"))
 MATERIAL_RAW = os.environ.get("MATERIAL_RAW", os.path.join(DICT_DIR, "materials.yaml"))
 STANDARD_RAW = os.environ.get("STANDARD_RAW", os.path.join(DICT_DIR, "standards.yaml"))
 VENDOR_RAW = os.environ.get("VENDOR_RAW", os.path.join(DICT_DIR, "vendors.yaml"))
+SIZES_RAW = os.environ.get("SIZES_RAW", os.path.join(DICT_DIR, "sizes.yaml"))
 
 # Пути к очищенным данным
 CLEAN_DIR = os.environ.get("CLEAN_DIR", os.path.join(DICT_DIR, "clean"))

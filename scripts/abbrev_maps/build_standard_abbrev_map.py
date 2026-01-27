@@ -1,13 +1,45 @@
+import os
 import json
-import requests
+import yaml
+import logging
 
-# Импорт путей и настроек для нормализации стандартов
-from scripts.config import OLLAMA_URL, OLLAMA_MODEL, STANDARD_CLEAN, STANDARD_MAP
+logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+
+from scripts.config import (
+    STANDARD_RAW,
+    STANDARD_MAP
+)
+
+from scripts.llm.llm_utils import call_llm_mapping
+
+CHUNK_SIZE = 150
 
 
-# Вызов LLM для нормализации инженерных стандартов
-def call_llm(standards):
-    prompt = f"""
+def load_yaml_list(path, key):
+    if not os.path.exists(path):
+        logging.warning(f"YAML file not found: {path}")
+        return []
+    with open(path, "r", encoding="utf8") as f:
+        data = yaml.safe_load(f) or {}
+        raw = data.get(key, [])
+    out = []
+
+    def flatten(x):
+        if isinstance(x, list):
+            for i in x:
+                flatten(i)
+        elif isinstance(x, dict) or x is None:
+            return
+        else:
+            out.append(str(x).strip().upper())
+
+    flatten(raw)
+    logging.info(f"Loaded {len(out)} RAW standard tokens")
+    return out
+
+
+def call_llm(tokens):
+    prompt = """
 You are normalizing engineering standard abbreviations.
 
 Your task for EACH RAW standard token:
@@ -36,60 +68,36 @@ Your task for EACH RAW standard token:
 
 Return STRICT JSON ONLY:
 
-{{
-  "mapping": {{
+{
+  "mapping": {
       "RAW_TOKEN": "BASE_STANDARD"
-  }}
-}}
+  }
+}
 
 RAW_TOKENS:
-{standards}
-"""
+""" + str(tokens)
 
-    resp = requests.post(
-        OLLAMA_URL,
-        json={"model": OLLAMA_MODEL, "prompt": prompt},
-        stream=True  # Потоковый вывод — LLM присылает ответ частями
-    )
-
-    buffer = ""
-    for line in resp.iter_lines():
-        if not line:
-            continue
-        try:
-            obj = json.loads(line.decode())  # Каждая строка — JSON-объект с полем "response"
-        except:
-            continue
-        if "response" in obj:
-            buffer += obj["response"]  # Собираем текст ответа
-        if obj.get("done"):
-            break  # LLM сообщает, что вывод завершён
-
-    # Поиск JSON внутри потока текста
-    start = buffer.find("{")
-    end = buffer.rfind("}")
-    if start == -1 or end == -1:
-        return {}  # Если JSON не найден — возвращаем пустой словарь
-
-    data = json.loads(buffer[start:end+1].replace("'", '"'))  # Приводим к валидному JSON
-    mapping = data.get("mapping", {}) or {}
-
-    return {k.upper(): v.upper() for k, v in mapping.items()}  # Приводим ключи и значения к верхнему регистру
+    return call_llm_mapping(prompt)
 
 
-# Основная функция: загрузка стандартов, нормализация, сохранение результата
+def call_llm_in_chunks(tokens):
+    full_mapping = {}
+    for i in range(0, len(tokens), CHUNK_SIZE):
+        chunk = tokens[i:i+CHUNK_SIZE]
+        logging.info(f"Processing standard chunk {i}–{i+len(chunk)}")
+        mapping = call_llm(chunk)
+        full_mapping.update(mapping)
+    return full_mapping
+
+
 def main():
-    with open(STANDARD_CLEAN, "r", encoding="utf-8") as f:
-        import yaml
-        data = yaml.safe_load(f) or {}  # Загружаем YAML, если пустой — {}
-        standards = data.get("standards", [])  # Берём список стандартов
+    tokens = load_yaml_list(STANDARD_RAW, "standards")
+    mapping = call_llm_in_chunks(tokens)
 
-    mapping = call_llm(standards)  # Нормализуем через LLM
+    with open(STANDARD_MAP, "w", encoding="utf8") as f:
+        json.dump(mapping, f, indent=2, ensure_ascii=False)
 
-    with open(STANDARD_MAP, "w", encoding="utf-8") as f:
-        json.dump(mapping, f, indent=2, ensure_ascii=False)  # Сохраняем JSON-маппинг
-
-    print(f"Saved standard abbreviation map to {STANDARD_MAP}")
+    logging.info(f"Saved mapping: {STANDARD_MAP}")
 
 
 if __name__ == "__main__":

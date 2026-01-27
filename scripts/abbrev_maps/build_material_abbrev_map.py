@@ -1,22 +1,25 @@
 import os
 import json
 import yaml
-import requests
+import logging
 
-# Импорт путей и настроек для материалов
+logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+
 from scripts.config import (
-    OLLAMA_MODEL,
-    OLLAMA_URL,
-    MATERIAL_CLEAN,
+    MATERIAL_RAW,
     MATERIAL_MAP
 )
 
+from scripts.llm.llm_utils import call_llm_mapping
 
-# Загрузка списка материалов из YAML с разворачиванием вложенных структур
+CHUNK_SIZE = 150
+
+
 def load_yaml_list(path, key):
     if not os.path.exists(path):
+        logging.warning(f"YAML file not found: {path}")
         return []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf8") as f:
         data = yaml.safe_load(f) or {}
         raw = data.get(key, [])
     out = []
@@ -31,12 +34,12 @@ def load_yaml_list(path, key):
             out.append(str(x).strip().upper())
 
     flatten(raw)
+    logging.info(f"Loaded {len(out)} RAW material tokens")
     return out
 
 
-# Вызов LLM для нормализации материалов
-def call_llm(materials):
-    prompt = f"""
+def call_llm(tokens):
+    prompt = """
 You are normalizing engineering material abbreviations.
 
 Your task for EACH RAW material token:
@@ -79,55 +82,36 @@ Your task for EACH RAW material token:
 
 Return STRICT JSON ONLY:
 
-{{
-  "mapping": {{
+{
+  "mapping": {
       "RAW_TOKEN": "NORMALIZED_MATERIAL"
-  }}
-}}
+  }
+}
 
 RAW_TOKENS:
-{materials}
-"""
+""" + str(tokens)
 
-    resp = requests.post(
-        OLLAMA_URL,
-        json={"model": OLLAMA_MODEL, "prompt": prompt},
-        stream=True
-    )
-
-    buffer = ""
-    for line in resp.iter_lines():
-        if not line:
-            continue
-        try:
-            obj = json.loads(line.decode())
-        except:
-            continue
-        if "response" in obj:
-            buffer += obj["response"]
-        if obj.get("done"):
-            break
-
-    start = buffer.find("{")
-    end = buffer.rfind("}")
-    if start == -1 or end == -1:
-        return {}
-
-    data = json.loads(buffer[start:end+1].replace("'", '"'))
-    mapping = data.get("mapping", {}) or {}
-
-    return {k.upper(): v.upper() for k, v in mapping.items()}
+    return call_llm_mapping(prompt)
 
 
-# Загрузка материалов, нормализация, сохранение маппинга
+def call_llm_in_chunks(tokens):
+    full_mapping = {}
+    for i in range(0, len(tokens), CHUNK_SIZE):
+        chunk = tokens[i:i+CHUNK_SIZE]
+        logging.info(f"Processing material chunk {i}–{i+len(chunk)}")
+        mapping = call_llm(chunk)
+        full_mapping.update(mapping)
+    return full_mapping
+
+
 def main():
-    materials = load_yaml_list(MATERIAL_CLEAN, "materials")
-    mapping = call_llm(materials)
+    tokens = load_yaml_list(MATERIAL_RAW, "materials")
+    mapping = call_llm_in_chunks(tokens)
 
-    with open(MATERIAL_MAP, "w", encoding="utf-8") as f:
+    with open(MATERIAL_MAP, "w", encoding="utf8") as f:
         json.dump(mapping, f, indent=2, ensure_ascii=False)
 
-    print("Saved:", MATERIAL_MAP)
+    logging.info(f"Saved mapping: {MATERIAL_MAP}")
 
 
 if __name__ == "__main__":

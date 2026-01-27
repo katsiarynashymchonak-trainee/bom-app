@@ -1,44 +1,45 @@
 import os
 import json
 import yaml
-import requests
+import logging
 
-# Импорт путей и настроек для нормализации компонентных типов
+logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+
 from scripts.config import (
-    COMPONENT_CLEAN,
-    COMPONENT_MAP,
-    OLLAMA_MODEL,
-    OLLAMA_URL
+    COMPONENT_RAW,
+    COMPONENT_MAP
 )
 
+from scripts.llm.llm_utils import call_llm_mapping
 
-# Загрузка списка компонентных типов из YAML с разворачиванием вложенных структур
+CHUNK_SIZE = 150
+
+
 def load_yaml_list(path, key):
     if not os.path.exists(path):
+        logging.warning(f"YAML file not found: {path}")
         return []
     with open(path, "r", encoding="utf8") as f:
-        data = yaml.safe_load(f) or {}  # Загружаем YAML, если пустой — подставляем {}
-        raw = data.get(key, [])  # Берём список по ключу
+        data = yaml.safe_load(f) or {}
+        raw = data.get(key, [])
     out = []
 
     def flatten(x):
-        # Рекурсивно разворачиваем вложенные списки
         if isinstance(x, list):
             for i in x:
                 flatten(i)
         elif isinstance(x, dict) or x is None:
-            return  # Игнорируем словари и None
+            return
         else:
-            out.append(str(x).strip().upper())  # Приводим к строке и верхнему регистру
+            out.append(str(x).strip().upper())
 
     flatten(raw)
+    logging.info(f"Loaded {len(out)} RAW component tokens")
     return out
 
 
-# Вызов LLM для нормализации компонентных типов
 def call_llm(tokens):
-    prompt = f"""
-You are normalizing engineering component type abbreviations.
+    prompt = """ You are normalizing engineering component type abbreviations.
 
 Your task for EACH RAW token:
 
@@ -105,50 +106,29 @@ Canonical component types:
 {tokens}
 
 Raw tokens:
-{tokens}
+""" + str(tokens)
 
-"""
-
-    resp = requests.post(
-        OLLAMA_URL,
-        json={"model": OLLAMA_MODEL, "prompt": prompt},
-        stream=True  # Потоковый режим — LLM присылает ответ частями
-    )
-
-    buffer = ""
-    for line in resp.iter_lines():
-        if not line:
-            continue
-        try:
-            obj = json.loads(line.decode())  # Каждая строка — JSON-объект с полем "response"
-        except:
-            continue
-        if "response" in obj:
-            buffer += obj["response"]  # Собираем текст ответа
-        if obj.get("done"):
-            break  # LLM сообщает, что вывод завершён
-
-    # Поиск первого и последнего символа JSON
-    start = buffer.find("{")
-    end = buffer.rfind("}")
-    if start == -1 or end == -1:
-        return {}  # Если JSON не найден — возвращаем пустой словарь
-
-    data = json.loads(buffer[start:end + 1].replace("'", '"'))  # Приводим к валидному JSON
-    mapping = data.get("mapping", {}) or {}
-
-    return {k.upper(): v.upper() for k, v in mapping.items()}  # Приводим ключи и значения к верхнему регистру
+    return call_llm_mapping(prompt)
 
 
-# Основная функция: загрузка токенов, нормализация, сохранение результата
+def call_llm_in_chunks(tokens):
+    full_mapping = {}
+    for i in range(0, len(tokens), CHUNK_SIZE):
+        chunk = tokens[i:i+CHUNK_SIZE]
+        logging.info(f"Processing component chunk {i}–{i+len(chunk)}")
+        mapping = call_llm(chunk)
+        full_mapping.update(mapping)
+    return full_mapping
+
+
 def main():
-    tokens = load_yaml_list(COMPONENT_CLEAN, "component_types")  # Загружаем очищенные типы компонентов
-    mapping = call_llm(tokens)  # Нормализуем через LLM
+    tokens = load_yaml_list(COMPONENT_RAW, "component_types")
+    mapping = call_llm_in_chunks(tokens)
 
     with open(COMPONENT_MAP, "w", encoding="utf8") as f:
-        json.dump(mapping, f, indent=2, ensure_ascii=False)  # Сохраняем JSON-маппинг
+        json.dump(mapping, f, indent=2, ensure_ascii=False)
 
-    print("Saved", COMPONENT_MAP)
+    logging.info(f"Saved mapping: {COMPONENT_MAP}")
 
 
 if __name__ == "__main__":
