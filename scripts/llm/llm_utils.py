@@ -2,7 +2,7 @@ import json
 import logging
 import requests
 
-from scripts.config import OLLAMA_URL, OLLAMA_MODEL
+from src.config import OLLAMA_URL, OLLAMA_MODEL
 
 
 SYSTEM_PROMPT = """

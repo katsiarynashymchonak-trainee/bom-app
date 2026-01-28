@@ -7,7 +7,7 @@ from normalizer_core import (
 )
 
 # Импорт путей и настроек для нормализации материалов
-from scripts.config import (
+from src.config import (
     MATERIAL_CLEAN,
     MATERIAL_MAP,
     MATERIAL_NOISE,

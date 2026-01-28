@@ -8,7 +8,7 @@ import subprocess
 import re
 
 # Импорт путей и настроек проекта
-from scripts.config import (
+from src.config import (
     OLLAMA_URL,
     OLLAMA_MODEL,
     DESCRIPTIONS_PATH,

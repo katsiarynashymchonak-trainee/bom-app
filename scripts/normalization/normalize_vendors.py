@@ -5,7 +5,7 @@ from normalizer_core import (
     save_json,
     clean_token
 )
-from scripts.config import VENDOR_RAW, VENDOR_MAP, VENDOR_CLEAN, VENDOR_NOISE
+from src.config import VENDOR_RAW, VENDOR_MAP, VENDOR_CLEAN, VENDOR_NOISE
 
 
 # Основная логика нормализации вендоров

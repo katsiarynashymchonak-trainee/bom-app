@@ -5,7 +5,7 @@ import ahocorasick
 from dataclasses import dataclass
 from typing import List, Dict
 
-from scripts.config import (
+from src.config import (
     COMPONENT_CLEAN,
     MATERIAL_CLEAN,
     VENDOR_CLEAN,

@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 
-from scripts.config import ROOT_DIR
+from src.config import ROOT_DIR
 
 DB_PATH = os.path.join(ROOT_DIR, "data", "bom.sqlite3")
 DB_URL = f"sqlite:///{DB_PATH}"
