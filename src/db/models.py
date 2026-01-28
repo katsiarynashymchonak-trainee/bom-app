@@ -1,4 +1,3 @@
-# src/db/models.py
 from sqlalchemy import (
     Column,
     Integer,
@@ -6,6 +5,8 @@ from sqlalchemy import (
     Float,
     Boolean,
     Text,
+    DateTime,
+    func,
 )
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 
@@ -27,7 +28,6 @@ class ComponentDB(Base):
     # Исходные поля
     material_id = Column(String, index=True, nullable=False)
     component_id = Column(String, index=True, nullable=False)
-    description = Column(Text, nullable=False)
     qty = Column(Float, nullable=False, default=1.0)
     path = Column(String, index=True, nullable=False)
 
@@ -36,7 +36,6 @@ class ComponentDB(Base):
     abs_level = Column(Integer, index=True, nullable=True)
 
     # Тип узла
-    record_type = Column(String, index=True, nullable=True)  # ASSEMBLY / SUBASSEMBLY / LEAF
     is_assembly = Column(Boolean, default=False)
     is_subassembly = Column(Boolean, default=False)
     is_leaf = Column(Boolean, default=False)
@@ -53,3 +52,6 @@ class ComponentDB(Base):
 
     # Эмбеддинг
     embedding_vector = Column(SQLiteJSON, nullable=True)
+
+    # Временная метка изменений
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
