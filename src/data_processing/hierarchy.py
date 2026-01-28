@@ -8,14 +8,14 @@ import hashlib
 logger = logging.getLogger(__name__)
 
 
-# Обработчик иерархических BOM данных
+# Обработчик иерархии BOM
 class HierarchyProcessor:
 
     def __init__(self):
         logger.info("HierarchyProcessor initialized")
         self.stats: Dict = {}
 
-    # Основной конвейер обработки
+    # основной конвейер обработки
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         total_start = time.time()
         logger.info("Hierarchy: starting processing (%d rows)", len(df))
@@ -38,15 +38,15 @@ class HierarchyProcessor:
         )
         logger.info("Hierarchy: abs_level computed in %.3f sec", time.time() - t)
 
-        # определение типа узлов
-        t = time.time()
-        df_h = self._determine_node_types(df_h)
-        logger.info("Hierarchy: _determine_node_types completed in %.3f sec", time.time() - t)
-
         # извлечение parent_id
         t = time.time()
         df_h["parent_id"] = self._extract_parent_ids(df_h["path"])
         logger.info("Hierarchy: _extract_parent_ids completed in %.3f sec", time.time() - t)
+
+        # определение типа узлов
+        t = time.time()
+        df_h = self._determine_node_types(df_h)
+        logger.info("Hierarchy: _determine_node_types completed in %.3f sec", time.time() - t)
 
         # генерация уникальных идентификаторов
         t = time.time()
@@ -58,10 +58,15 @@ class HierarchyProcessor:
         df_h = self._calculate_usage_stats(df_h)
         logger.info("Hierarchy: _calculate_usage_stats completed in %.3f sec", time.time() - t)
 
-        # сбор статистики
+        # построение числовой иерархии
         t = time.time()
-        self._collect_hierarchy_stats(df_h)
-        logger.info("Hierarchy: _collect_hierarchy_stats completed in %.3f sec", time.time() - t)
+        df_h = self._convert_to_numeric_hierarchy(df_h)
+        logger.info("Hierarchy: _convert_to_numeric_hierarchy completed in %.3f sec", time.time() - t)
+
+        # нормализация parent_id
+        t = time.time()
+        df_h = self._normalize_parent_ids(df_h)
+        logger.info("Hierarchy: _normalize_parent_ids completed in %.3f sec", time.time() - t)
 
         logger.info(
             "Hierarchy: processing completed in %.3f sec (%d rows)",
@@ -71,7 +76,7 @@ class HierarchyProcessor:
 
         return df_h
 
-    # Исправление путей
+    # исправление путей
     def _fix_paths(self, df: pd.DataFrame) -> pd.DataFrame:
         start = time.time()
         logger.info("Hierarchy: fixing paths")
@@ -101,7 +106,20 @@ class HierarchyProcessor:
         )
         return df_fixed
 
-    # Определение типа узлов на основе структуры
+    # извлечение parent_id
+    @staticmethod
+    def _extract_parent_ids(paths: pd.Series) -> pd.Series:
+        paths = paths.fillna("").astype(str)
+        has_parent = paths.str.contains(r"\.")
+        parent = pd.Series([None] * len(paths), index=paths.index, dtype="object")
+
+        split = paths[has_parent].str.rsplit(".", n=1).str[0]
+        parent_ids = split.str.split(".").str[-1]
+
+        parent.loc[has_parent] = parent_ids
+        return parent
+
+    # определение типа узлов
     def _determine_node_types(self, df: pd.DataFrame) -> pd.DataFrame:
         start = time.time()
         logger.info("Hierarchy: determining node types")
@@ -112,24 +130,14 @@ class HierarchyProcessor:
             if col not in df_t.columns:
                 df_t[col] = False
 
-        df_t = df_t.sort_values("path").reset_index(drop=True)
+        df_t["is_assembly"] = df_t["abs_level"] == 0
 
-        paths = df_t["path"].astype(str).tolist()
-        n = len(paths)
-
-        has_children = [False] * n
-
-        for i in range(n - 1):
-            p = paths[i]
-            next_p = paths[i + 1]
-            if next_p.startswith(p + "."):
-                has_children[i] = True
-
-        df_t["has_children"] = has_children
+        children_map = df_t["parent_id"].value_counts().to_dict()
+        df_t["has_children"] = df_t["component_id"].astype(str).map(children_map).fillna(0) > 0
 
         df_t["is_leaf"] = ~df_t["has_children"]
-        df_t.loc[df_t["has_children"] & (df_t["abs_level"] > 0), "is_subassembly"] = True
-        df_t.loc[df_t["abs_level"] == 0, "is_assembly"] = True
+
+        df_t["is_subassembly"] = df_t["has_children"] & (df_t["abs_level"] > 0)
 
         df_t["record_type"] = np.select(
             [
@@ -150,20 +158,7 @@ class HierarchyProcessor:
         )
         return df_t
 
-    # Извлечение parent_id
-    @staticmethod
-    def _extract_parent_ids(paths: pd.Series) -> pd.Series:
-        paths = paths.fillna("").astype(str)
-        has_parent = paths.str.contains(r"\.")
-        parent = pd.Series([None] * len(paths), index=paths.index, dtype="object")
-
-        split = paths[has_parent].str.rsplit(".", n=1).str[0]
-        parent_ids = split.str.split(".").str[-1]
-
-        parent.loc[has_parent] = parent_ids
-        return parent
-
-    # Генерация уникальных идентификаторов
+    # генерация уникальных идентификаторов
     @staticmethod
     def _create_unique_ids(df: pd.DataFrame) -> pd.Series:
         def make_uid(row):
@@ -173,7 +168,7 @@ class HierarchyProcessor:
 
         return df.apply(make_uid, axis=1)
 
-    # Статистика использования
+    # статистика использования
     def _calculate_usage_stats(self, df: pd.DataFrame) -> pd.DataFrame:
         start = time.time()
         logger.info("Hierarchy: calculating usage statistics")
@@ -203,36 +198,47 @@ class HierarchyProcessor:
         )
         return df_u
 
-    # Сбор статистики
-    def _collect_hierarchy_stats(self, df: pd.DataFrame):
-        start = time.time()
-        logger.info("Hierarchy: collecting statistics")
+    # построение числовой иерархии
+    def _convert_to_numeric_hierarchy(self, df: pd.DataFrame) -> pd.DataFrame:
+        df_n = df.copy()
 
-        stats: Dict[str, Optional[float]] = {}
+        df_n = df_n.reset_index(drop=True)
+        df_n["temp_id"] = df_n.index + 1
 
-        stats["max_depth"] = int(df["abs_level"].max())
-        stats["avg_depth"] = float(df["abs_level"].mean())
-        stats["std_depth"] = float(df["abs_level"].std())
+        comp_to_temp = dict(zip(df_n["component_id"], df_n["temp_id"]))
 
-        stats["record_type_distribution"] = df["record_type"].value_counts().to_dict()
-        stats["level_distribution"] = df["abs_level"].value_counts().sort_index().to_dict()
+        def convert_path(p):
+            if not p:
+                return None
+            parts = p.split(".")
+            converted = [str(comp_to_temp.get(part)) for part in parts if part in comp_to_temp]
+            return ".".join(converted) if converted else None
 
-        stats["total_assemblies"] = int(df["is_assembly"].sum())
-        stats["total_subassemblies"] = int(df["is_subassembly"].sum())
-        stats["total_leaf"] = int(df["is_leaf"].sum())
+        df_n["numeric_path"] = df_n["path"].apply(convert_path)
 
-        if "usage_count" in df.columns:
-            stats["max_usage"] = int(df["usage_count"].max())
-            stats["avg_usage"] = float(df["usage_count"].mean())
-            stats["unique_components"] = int((df["usage_count"] == 1).sum())
+        def extract_parent(npath):
+            if not npath or "." not in npath:
+                return None
+            return int(npath.rsplit(".", 1)[0].split(".")[-1])
 
-        self.stats.update(stats)
-
-        logger.info(
-            "Hierarchy: statistics collected in %.3f sec", time.time() - start
+        df_n["parent_id"] = df_n["numeric_path"].apply(extract_parent)
+        df_n["parent_id"] = df_n["parent_id"].apply(
+            lambda x: str(int(x)) if pd.notna(x) else None
         )
 
-    # Возврат статистики
-    def get_stats(self) -> Dict:
-        logger.info("Hierarchy: returning stats")
-        return self.stats
+        df_n["path"] = df_n["numeric_path"]
+        df_n = df_n.drop(columns=["numeric_path"])
+
+        return df_n
+
+    # нормализация parent_id
+    def _normalize_parent_ids(self, df: pd.DataFrame) -> pd.DataFrame:
+        df_n = df.copy()
+
+        valid_ids = set(df_n["temp_id"].astype(str))
+
+        df_n["parent_id"] = df_n["parent_id"].apply(
+            lambda pid: pid if pid in valid_ids else None
+        )
+
+        return df_n

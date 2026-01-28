@@ -1,4 +1,4 @@
-# bom_app/scripts/config.py
+# bom_app/src/config.py
 import os
 
 # Основные настройки

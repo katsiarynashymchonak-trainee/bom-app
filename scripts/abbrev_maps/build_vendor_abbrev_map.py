@@ -5,7 +5,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 
-from scripts.config import (
+from src.config import (
     VENDOR_RAW,
     VENDOR_MAP
 )

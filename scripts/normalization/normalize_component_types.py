@@ -9,7 +9,7 @@ from normalizer_core import (
     clean_token
 )
 
-from scripts.config import (
+from src.config import (
     COMPONENT_RAW,
     COMPONENT_MAP,
     COMPONENT_CLEAN,

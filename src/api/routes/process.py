@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File
 import shutil
 import os
 
-from scripts.config import RAW_DATA_DIR
+from src.config import RAW_DATA_DIR
 from src.core.process_service import start_processing
 from src.core.task_manager import TaskManager
 

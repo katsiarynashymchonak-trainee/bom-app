@@ -8,7 +8,7 @@ from normalizer_core import (
 )
 
 # Импорт путей и настроек для нормализации стандартов
-from scripts.config import (
+from src.config import (
     STANDARD_RAW,
     STANDARD_MAP,
     STANDARD_CLEAN,

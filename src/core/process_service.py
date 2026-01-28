@@ -12,15 +12,12 @@ from src.db.init_db import import_from_parquet
 
 logger = logging.getLogger(__name__)
 
-# Глобальный пул потоков
+# глобальный пул потоков
 executor = ThreadPoolExecutor(max_workers=4)
 
 
+# запуск фоновой обработки
 def start_processing(file_path: str) -> str:
-    """
-    Запускает обработку в отдельном потоке.
-    Возвращает task_id немедленно.
-    """
     task_id = str(uuid.uuid4())
     TaskManager.create(task_id)
 
@@ -31,18 +28,16 @@ def start_processing(file_path: str) -> str:
     return task_id
 
 
+# фоновая задача обработки CSV и импорта в БД
 def run_processing(task_id: str, file_path: str) -> None:
-    """
-    Фоновая задача: чтение CSV, запуск пайплайна, сохранение parquet и импорт в БД.
-    """
     logger.info("run_processing STARTED for task %s, file %s", task_id, file_path)
 
     try:
-        # Step 1 — чтение CSV
+        # чтение CSV
         TaskManager.update(task_id, status="running", progress=5, message="Reading CSV file...")
         df = pd.read_csv(file_path)
 
-        # Step 2 — запуск пайплайна
+        # запуск пайплайна
         TaskManager.update(task_id, progress=20, message="Running processing pipeline...")
         processor = SimpleBOMProcessor()
         processed_df = processor.process_pipeline(df)
@@ -50,7 +45,7 @@ def run_processing(task_id: str, file_path: str) -> None:
 
         logger.info("Task %s: processed %d rows", task_id, len(processed_df))
 
-        # Step 3 — сохранение parquet
+        # сохранение parquet
         TaskManager.update(task_id, progress=60, message="Saving processed parquet...")
 
         output_dir = "data/processed"
@@ -61,23 +56,16 @@ def run_processing(task_id: str, file_path: str) -> None:
 
         logger.info("Task %s: parquet saved to %s", task_id, output_path)
 
-        # Step 4 — импорт parquet в БД
+        # импорт parquet в БД
         TaskManager.update(task_id, progress=80, message="Importing into database...")
         imported_rows = import_from_parquet()
-
-        # аккуратно достаём статистику по иерархии
-        counts = (stats.get("counts") or {})
-        root_asm = counts.get("root_assemblies", 0)
-        asm = counts.get("assemblies", 0)
-        comps = counts.get("components", 0)
 
         summary_msg = (
             f"Processing completed successfully "
             f"({imported_rows} rows imported; "
-            f"root assemblies: {root_asm}, assemblies: {asm}, components: {comps})."
         )
 
-        # Step 5 — завершение
+        # завершение
         TaskManager.update(
             task_id,
             status="done",

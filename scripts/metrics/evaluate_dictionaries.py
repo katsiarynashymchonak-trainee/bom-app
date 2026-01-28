@@ -3,7 +3,7 @@ import json
 import logging
 
 # Импорт путей
-from scripts.config import (
+from src.config import (
     DICT_DIR,
     COMPONENT_RAW,
     COMPONENT_CLEAN,

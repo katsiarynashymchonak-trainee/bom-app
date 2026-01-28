@@ -4,16 +4,31 @@ from typing import List, Optional, Dict, Any
 from src.core.models import ComponentCreate, ComponentUpdate, ComponentRead
 from src.core.component_service import ComponentService
 
+# Роутер для операций с компонентами
 router = APIRouter(prefix="/components", tags=["components"])
 
 service = ComponentService()
 
 
+# Получение списка всех material_id
+@router.get("/material_ids")
+def get_material_ids() -> List[str]:
+    return service.list_material_ids()
+
+
+# Получение списка всех vendors
+@router.get("/vendors")
+def get_vendors() -> List[str]:
+    return service.list_vendors()
+
+
+# Создание нового компонента
 @router.post("", response_model=ComponentRead)
 def create_component(payload: ComponentCreate):
     return service.create_component(payload)
 
 
+# Получение компонента по ID
 @router.get("/{component_id}", response_model=ComponentRead)
 def get_component(component_id: int):
     result = service.get_component(component_id)
@@ -22,6 +37,7 @@ def get_component(component_id: int):
     return result
 
 
+# Обновление компонента
 @router.patch("/{component_id}", response_model=ComponentRead)
 def update_component(component_id: int, payload: ComponentUpdate):
     result = service.update_component(component_id, payload)
@@ -30,6 +46,7 @@ def update_component(component_id: int, payload: ComponentUpdate):
     return result
 
 
+# Удаление компонента
 @router.delete("/{component_id}")
 def delete_component(component_id: int):
     ok = service.delete_component(component_id)
@@ -38,12 +55,11 @@ def delete_component(component_id: int):
     return {"deleted": True}
 
 
+# Получение списка компонентов с фильтрами и пагинацией
 @router.get("", response_model=List[ComponentRead])
 def list_components(
     limit: int = Query(100, ge=1, le=1_000_000),
     offset: int = Query(0, ge=0),
-
-    # фильтры
     material_id: Optional[str] = None,
     component_id: Optional[str] = None,
     record_type: Optional[str] = None,

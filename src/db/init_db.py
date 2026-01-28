@@ -4,10 +4,8 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import text
 
-from scripts.config import ROOT_DIR
+from src.config import ROOT_DIR
 from src.db.database import Base, engine, SessionLocal
-from src.core.component_service import ComponentService
-from src.core.models import ComponentCreate
 from src.db.models import ComponentDB
 
 

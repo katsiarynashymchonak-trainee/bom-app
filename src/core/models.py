@@ -10,7 +10,6 @@ class Component:
 
     material_id: str
     component_id: str
-    description: str
     qty: float
     level: int
     path: str
@@ -32,9 +31,6 @@ class Component:
     usage_count: int = 0
     parent_id: Optional[str] = None
 
-    # ASSEMBLY / SUBASSEMBLY / LEAF
-    record_type: str = ""
-
     unique_id: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
@@ -42,7 +38,6 @@ class Component:
         return {
             "material_id": self.material_id,
             "component_id": self.component_id,
-            "description": self.description,
             "qty": self.qty,
             "level": self.level,
             "path": self.path,
@@ -61,7 +56,6 @@ class Component:
 
             "usage_count": self.usage_count,
             "parent_id": self.parent_id,
-            "record_type": self.record_type,
             "unique_id": self.unique_id,
         }
 
@@ -96,7 +90,6 @@ class ProcessingResult:
 class ComponentBase(BaseModel):
     material_id: str
     component_id: str
-    description: str
     qty: float
     path: str
 
@@ -109,17 +102,12 @@ class ComponentBase(BaseModel):
 
     abs_level: int | None = None
 
-    # новые флаги
     is_assembly: bool | None = None
     is_subassembly: bool | None = None
     is_leaf: bool | None = None
 
     usage_count: int | None = None
     parent_id: str | None = None
-
-    # ASSEMBLY / SUBASSEMBLY / LEAF
-    record_type: str | None = None
-
     unique_id: str | None = None
 
 
@@ -131,7 +119,6 @@ class ComponentCreate(ComponentBase):
 class ComponentUpdate(BaseModel):
     """Модель для частичного обновления компонента через API."""
 
-    description: str | None = None
     qty: float | None = None
 
     clean_name: str | None = None
@@ -142,7 +129,6 @@ class ComponentUpdate(BaseModel):
     standard: str | None = None
 
     parent_id: str | None = None
-    record_type: str | None = None
 
     is_assembly: bool | None = None
     is_subassembly: bool | None = None

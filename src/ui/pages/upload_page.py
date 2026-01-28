@@ -7,13 +7,24 @@ from src.utils.api_client import (
     api_get_components,
     api_get_stats,
     api_delete_component,
+    api_search_components,
 )
 from src.utils.table_manager import DataTableManager
 
 API_URL = "http://localhost:8000"
 
+# кэширование статистики
+@st.cache_data
+def _load_stats():
+    return api_get_stats()
 
-# Диалог редактирования компонента
+# кэширование примера данных
+@st.cache_data
+def _load_components_sample():
+    return api_get_components(limit=50, offset=0)
+
+
+# диалог редактирования компонента
 @st.dialog("Edit Component")
 def edit_component_dialog():
     row = st.session_state.get("edit_row")
@@ -34,7 +45,6 @@ def edit_component_dialog():
 
     col1, col2 = st.columns(2)
 
-    # сохранение изменений
     if col1.button("Save"):
         payload = {k: v for k, v in updated.items()}
         r = requests.patch(f"{API_URL}/components/{row['id']}", json=payload)
@@ -53,13 +63,12 @@ def edit_component_dialog():
         else:
             st.error("Update failed")
 
-    # отмена редактирования
     if col2.button("Cancel"):
         st.session_state["edit_row"] = None
         st.rerun()
 
 
-# Основная вкладка загрузки и обработки данных
+# основная вкладка загрузки и обработки данных
 def render_upload_tab():
     st.markdown('<div class="main-header">Data Upload and Processing</div>', unsafe_allow_html=True)
 
@@ -70,9 +79,9 @@ def render_upload_tab():
     st.markdown('<div class="section-header">Current Database State</div>', unsafe_allow_html=True)
 
     try:
-        stats = api_get_stats()
+        stats = _load_stats()
         total_records = stats.get("total", 0)
-        components_sample = api_get_components(limit=50, offset=0)
+        components_sample = _load_components_sample()
         df_sample = pd.DataFrame(components_sample)
     except Exception as e:
         df_sample = pd.DataFrame()
@@ -112,7 +121,6 @@ def render_upload_tab():
         except Exception:
             st.warning("Could not preview file.")
 
-        # запуск пайплайна
         if st.button("Run Processing Pipeline", type="primary"):
             files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
 
@@ -146,11 +154,24 @@ def render_upload_tab():
         st.session_state["processing_task_id"] = None
 
         if state == "done":
-            st.success("Processing completed successfully.")
+            st.success("Processing completed successfully")
+
+            st.info("Rebuilding graph cache…")
+
+            try:
+                r = requests.post(f"{API_URL}/maintenance/rebuild_graph", timeout=120)
+                r.raise_for_status()
+                st.success("Graph cache rebuilt successfully.")
+            except Exception as e:
+                st.error("Failed to rebuild graph cache.")
+                log(f"Graph rebuild failed: {e}")
+                return
+
+            st.rerun()
+
         else:
             st.error("Processing pipeline failed.")
-
-        st.rerun()
+            st.rerun()
 
     # таблица базы данных
     st.markdown('<div class="section-header">Database Table</div>', unsafe_allow_html=True)
@@ -171,13 +192,38 @@ def render_upload_tab():
 
     # поиск
     search_col1, search_col2 = st.columns([3, 1])
-    with search_col1:
-        search_query = st.text_input("Search", value=manager.search_query)
-    with search_col2:
-        search_column = st.selectbox("Column", manager.get_searchable_columns(), index=0)
 
-    if search_query != manager.search_query or search_column != manager.search_column:
-        manager.set_search(search_query, search_column)
+    with search_col1:
+        search_query = st.text_input(
+            "Search",
+            value=st.session_state.get("search_query", ""),
+            key="search_query_input"
+        )
+
+    with search_col2:
+        search_column = st.selectbox(
+            "Column",
+            manager.get_searchable_columns(),
+            index=0,
+            key="search_column_select"
+        )
+
+    st.session_state.search_query = search_query
+    st.session_state.search_column = search_column
+
+    if search_query.strip():
+        results = api_search_components(
+            query=search_query,
+            column=search_column if search_column != "all" else None,
+            limit=500
+        )
+        table_df = pd.DataFrame(results)
+        manager.set_data(table_df)
+    else:
+        offset = (manager.current_page - 1) * manager.page_size
+        components_page = api_get_components(limit=manager.page_size, offset=offset)
+        table_df = pd.DataFrame(components_page)
+        manager.set_data(table_df)
 
     page_data, _, total_items_local = manager.get_paged_data()
 
@@ -187,7 +233,6 @@ def render_upload_tab():
     st.write(f"Total records in DB: {real_total}")
     st.write(f"Page {manager.current_page} of {real_total_pages}")
 
-    # таблица с возможностью редактирования
     if not page_data.empty:
         editable_df = page_data.copy()
         editable_df["Select"] = False
@@ -206,7 +251,6 @@ def render_upload_tab():
 
         col_edit, col_delete = st.columns(2)
 
-        # кнопка редактирования
         if col_edit.button("✏️ Edit selected"):
             if not selected_rows.empty:
                 st.session_state["edit_row"] = selected_rows.iloc[0].to_dict()
@@ -214,7 +258,6 @@ def render_upload_tab():
             else:
                 st.warning("No row selected")
 
-        # кнопка удаления
         if col_delete.button("🗑️ Delete selected"):
             if selected_rows.empty:
                 st.warning("No rows selected")
@@ -233,7 +276,6 @@ def render_upload_tab():
                 manager.set_data(table_df)
                 st.rerun()
 
-    # пагинация
     col_prev, col_next = st.columns(2)
 
     if col_prev.button("Previous"):
@@ -247,7 +289,6 @@ def render_upload_tab():
             manager.next_page()
             st.rerun()
 
-    # логирование
     with st.expander("Logs"):
         for entry in st.session_state.logs:
             st.text(entry)

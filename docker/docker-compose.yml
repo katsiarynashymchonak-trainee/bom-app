@@ -1,0 +1,35 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    image: bom-api
+    container_name: bom-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data
+      - ../data/chroma:/app/data/chroma
+    environment:
+      PYTHONUNBUFFERED: 1
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+
+  ui:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.ui
+    image: bom-ui
+    container_name: bom-ui
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    environment:
+      PYTHONUNBUFFERED: 1
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
