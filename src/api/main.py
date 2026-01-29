@@ -12,6 +12,7 @@ from src.api.routes.imports import router as import_router
 from src.api.routes.process import router as process_router
 from src.api.routes.graph import router as graph_router
 from src.api.routes.maintenance import router as maintenance_router
+from src.api.routes.embeddings import router as embedding_router
 
 
 import logging
@@ -46,3 +47,4 @@ app.include_router(import_router)
 app.include_router(process_router)
 app.include_router(graph_router)
 app.include_router(maintenance_router)
+app.include_router(embedding_router)

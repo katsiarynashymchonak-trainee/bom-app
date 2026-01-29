@@ -265,44 +265,60 @@ class ComponentService:
         return sorted([v for v in rows if v])
 
 
-# поиск похожих компонентов по эмбеддингам
-def get_similar_components(self, component_id: int, limit: int = 10):
-    with self._get_session() as session:
-        obj = session.get(ComponentDB, component_id)
-        if not obj or not obj.embedding_vector:
-            return []
+    # поиск похожих компонентов по эмбеддингам
+    def get_similar_components(self, component_id: int, limit: int = 10):
+        with self._get_session() as session:
+            obj = session.get(ComponentDB, component_id)
+            if not obj or not obj.embedding_vector:
+                return []
 
-        query_emb = obj.embedding_vector
+            query_emb = obj.embedding_vector
 
-        result = self.chroma.query(
-            query_embedding=query_emb,
-            n_results=limit + 1,
-            where=None
-        )
+            result = self.chroma.query(
+                query_embedding=query_emb,
+                n_results=limit + 1,
+                where=None
+            )
 
-        ids = result["ids"][0]
-        distances = result["distances"][0]
+            ids = result["ids"][0]
+            distances = result["distances"][0]
 
-        stmt = select(ComponentDB).where(ComponentDB.unique_id.in_(ids))
-        rows = session.execute(stmt).scalars().all()
+            stmt = select(ComponentDB).where(ComponentDB.unique_id.in_(ids))
+            rows = session.execute(stmt).scalars().all()
 
-        out = []
-        for r in rows:
-            if r.id == component_id:
-                continue
+            out = []
+            for r in rows:
+                if r.id == component_id:
+                    continue
 
-            dist = distances[ids.index(r.unique_id)]
-            out.append({
-                "id": r.id,
-                "component_id": r.component_id,
-                "clean_name": r.clean_name,
-                "vendor": r.vendor,
-                "material": r.material,
-                "size": r.size,
-                "standard": r.standard,
-                "similarity": 1 / (1 + dist)
-            })
+                dist = distances[ids.index(r.unique_id)]
+                out.append({
+                    "id": r.id,
+                    "component_id": r.component_id,
+                    "clean_name": r.clean_name,
+                    "vendor": r.vendor,
+                    "material": r.material,
+                    "size": r.size,
+                    "standard": r.standard,
+                    "similarity": 1 / (1 + dist)
+                })
 
-        out.sort(key=lambda x: x["similarity"], reverse=True)
+            out.sort(key=lambda x: x["similarity"], reverse=True)
 
-        return out[:limit]
+            return out[:limit]
+
+    def list_embeddings(self) -> List[Dict[str, Any]]:
+        with self._get_session() as session:
+            stmt = select(ComponentDB).where(ComponentDB.embedding_vector.isnot(None))
+            rows = session.execute(stmt).scalars().all()
+
+            out = []
+            for r in rows:
+                out.append({
+                    "id": r.id,
+                    "unique_id": r.unique_id,
+                    "clean_name": r.clean_name,
+                    "vector": r.embedding_vector,
+                })
+
+            return out
