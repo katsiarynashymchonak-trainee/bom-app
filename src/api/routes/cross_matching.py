@@ -12,9 +12,11 @@ service = CrossMatchingService()
 def similar_components(
     component_id: int,
     top_k: int = Query(10, ge=1, le=100),
+    same_level_only: bool = False,
 ):
-    results = service.find_similar(
+    return service.find_similar(
         component_id=component_id,
         top_k=top_k,
+        same_level_only=same_level_only,
     )
-    return results
+

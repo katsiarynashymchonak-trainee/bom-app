@@ -8,7 +8,7 @@ from src.utils.api_client import (
     api_get_similar_components,
     api_get_material_ids,
     api_hybrid_search,
-    api_get_vendors
+    api_get_vendors,
 )
 
 # кэширование списков
@@ -19,6 +19,7 @@ def _load_material_ids():
     except Exception:
         return []
 
+
 @st.cache_data
 def _load_vendors():
     try:
@@ -26,15 +27,17 @@ def _load_vendors():
     except Exception:
         return []
 
-@st.cache_data
+
+@st.cache_data(show_spinner=False)
 def _load_graph(root_id, max_depth):
     return api_get_graph(root_id=root_id, max_depth=max_depth)
+
 
 @st.cache_data
 def _load_component(cid):
     return api_get_component(cid)
 
-@st.cache_data
+
 def _load_similar(cid, limit):
     return api_get_similar_components(cid, limit)
 
@@ -139,7 +142,7 @@ def _render_controls():
             st.session_state.node_cache = {}
             st.session_state.graph_data = _load_graph(
                 st.session_state.graph_root,
-                max_depth
+                max_depth,
             )
             st.session_state.selected_node_id = None
 
@@ -189,7 +192,6 @@ def _render_search_and_hybrid():
         if material_filter == "":
             material_filter = None
 
-    hybrid_results = []
     if st.button("Run hybrid search"):
         hybrid_results = api_hybrid_search(
             query=hybrid_query,
@@ -213,10 +215,12 @@ def _render_search_and_hybrid():
 
             if st.button(
                 f"{comp['component_id']} — {comp.get('clean_name', '')}{score_str}",
-                key=f"hybrid_result_{comp['unique_id']}"
+                key=f"hybrid_result_{comp['unique_id']}",
             ):
                 st.session_state.selected_node_id = comp["id"]
                 st.session_state.node_cache = {}
+                st.session_state.similar_results = None
+                st.rerun()
 
     return search_query
 
@@ -236,6 +240,120 @@ def _render_maintenance():
         st.json(r.json())
 
 
+# детали выбранного узла
+def _render_node_details():
+    st.markdown("---")
+    st.markdown("### Node details")
+
+    if "node_cache" not in st.session_state:
+        st.session_state.node_cache = {}
+
+    node_id = st.session_state.selected_node_id
+    if not node_id:
+        st.info("Click on a node in the graph to see details.")
+        return
+
+    # загрузка компонента
+    if node_id in st.session_state.node_cache:
+        component = st.session_state.node_cache[node_id]
+    else:
+        component = _load_component(node_id)
+        if not component:
+            st.warning("Component not found.")
+            return
+        st.session_state.node_cache[node_id] = component
+
+    # определение типа записи
+    if component.get("is_assembly"):
+        record_type = "ASSEMBLY"
+    elif component.get("is_subassembly"):
+        record_type = "SUBASSEMBLY"
+    elif component.get("is_leaf"):
+        record_type = "LEAF"
+    else:
+        record_type = "UNKNOWN"
+
+    col_info, col_similar = st.columns([2, 1])
+
+    with col_info:
+        st.markdown(f"**Unique ID:** `{component.get('unique_id', '')}`")
+        st.markdown(f"**Material ID:** {component.get('material_id', '')}")
+        st.markdown(f"**Component ID:** {component.get('component_id', '')}")
+        st.markdown(f"**Clean name:** {component.get('clean_name', '')}")
+        st.markdown(f"**Record type:** {record_type}")
+        st.markdown(f"**Component type:** {component.get('component_type', '')}")
+        st.markdown(f"**Path:** `{component.get('path', '')}`")
+        st.markdown(f"**Level:** {component.get('abs_level', '')}")
+        st.markdown(f"**Usage count:** {component.get('usage_count', '')}")
+        st.markdown(f"**Vendor:** {component.get('vendor', '')}")
+        st.markdown(f"**Material:** {component.get('material', '')}")
+        st.markdown(f"**Size:** {component.get('size', '')}")
+        st.markdown(f"**Standard:** {component.get('standard', '')}")
+
+    with col_similar:
+        st.markdown("**Similar components (cross-matching)**")
+
+        same_level_only = st.checkbox("Same level only", value=False)
+
+        if st.button("Find similar components"):
+            st.session_state.similar_results = None
+
+            results = api_get_similar_components(
+                component["id"],
+                limit=10,
+                same_level_only=same_level_only,
+            )
+
+            st.session_state.similar_results = results
+
+            if not results or (
+                not results.get("same_assembly")
+                and not results.get("other_assemblies")
+                and not results.get("analogs")
+            ):
+                st.warning("No similar components found")
+                st.stop()
+
+            st.rerun()
+
+        results = st.session_state.get("similar_results", {})
+
+        if not results:
+            return
+
+        def _render_match_button(s, prefix: str):
+            label = (
+                f"{s['component_id']} — {s.get('clean_name', '')} "
+                f"(material {s.get('material', '')} sim {round(s['similarity'], 3)})"
+            )
+            if st.button(label, key=f"{prefix}_{s['id']}"):
+                if st.session_state.selected_node_id != s["id"]:
+                    st.session_state.selected_node_id = s["id"]
+                    st.session_state.node_cache.pop(s["id"], None)
+                    st.rerun()
+
+        # Same assembly
+        same_assembly = results.get("same_assembly", [])
+        if same_assembly:
+            st.markdown("#### Same assembly")
+            for s in same_assembly:
+                _render_match_button(s, "same")
+
+        # Other assemblies
+        other_assemblies = results.get("other_assemblies", [])
+        if other_assemblies:
+            st.markdown("#### Other assemblies")
+            for s in other_assemblies:
+                _render_match_button(s, "other")
+
+        # Analogs
+        analogs = results.get("analogs", [])
+        if analogs:
+            st.markdown("#### Analogs different clean name")
+            for s in analogs:
+                _render_match_button(s, "analog")
+
+
 # отображение графа
 def _render_graph_area(search_query):
     st.markdown("### Hierarchical Graph View")
@@ -252,7 +370,8 @@ def _render_graph_area(search_query):
         nodes_raw = nodes_raw[:2000]
         node_ids = {str(n["id"]) for n in nodes_raw}
         edges_raw = [
-            e for e in edges_raw
+            e
+            for e in edges_raw
             if str(e["source"]) in node_ids and str(e["target"]) in node_ids
         ]
 
@@ -271,85 +390,16 @@ def _render_graph_area(search_query):
 
     clicked = agraph(nodes=nodes, edges=edges, config=config)
 
-    if isinstance(clicked, str):
+    if isinstance(clicked, str) and clicked != st.session_state.selected_node_id:
         st.session_state.selected_node_id = clicked
-
-
-# детали выбранного узла
-def _render_node_details():
-    st.markdown("---")
-    st.markdown("### Node details")
-
-    if "node_cache" not in st.session_state:
-        st.session_state.node_cache = {}
-
-    node_id = st.session_state.selected_node_id
-    if not node_id:
-        st.info("Click on a node in the graph to see details.")
-        return
-
-    if "last_selected_node" not in st.session_state:
-        st.session_state.last_selected_node = None
-
-    if st.session_state.last_selected_node != node_id:
-        st.session_state.similar_results = []
-        st.session_state.last_selected_node = node_id
-
-    if node_id in st.session_state.node_cache:
-        component = st.session_state.node_cache[node_id]
-    else:
-        component = _load_component(node_id)
-        if not component:
-            st.warning("Component not found.")
-            return
-        st.session_state.node_cache[node_id] = component
-
-    if component.get("is_assembly"):
-        record_type = "ASSEMBLY"
-    elif component.get("is_subassembly"):
-        record_type = "SUBASSEMBLY"
-    elif component.get("is_leaf"):
-        record_type = "LEAF"
-    else:
-        record_type = "UNKNOWN"
-
-    col_info, col_similar = st.columns([2, 1])
-
-    with col_info:
-        st.markdown(f"**Unique ID:** `{component.get('unique_id', '')}`")
-        st.markdown(f"**Component ID:** {component.get('component_id', '')}")
-        st.markdown(f"**Clean name:** {component.get('clean_name', '')}")
-        st.markdown(f"**Record type:** {record_type}")
-        st.markdown(f"**Component type:** {component.get('component_type', '')}")
-        st.markdown(f"**Path:** `{component.get('path', '')}`")
-        st.markdown(f"**Level:** {component.get('abs_level', '')}")
-        st.markdown(f"**Usage count:** {component.get('usage_count', '')}")
-        st.markdown(f"**Vendor:** {component.get('vendor', '')}")
-        st.markdown(f"**Material:** {component.get('material', '')}")
-        st.markdown(f"**Size:** {component.get('size', '')}")
-        st.markdown(f"**Standard:** {component.get('standard', '')}")
-
-    with col_similar:
-        st.markdown("**Similar components (cross-matching)**")
-
-        if st.button("Find similar components"):
-            st.session_state.similar_results = _load_similar(component["id"], 10)
-
-        similar_results = st.session_state.get("similar_results", [])
-
-        if similar_results:
-            for s in similar_results:
-                label = f"{s['component_id']} — {s.get('clean_name', '')} (sim={round(s['similarity'], 3)})"
-
-                if st.button(label, key=f"similar_{s['id']}"):
-                    st.session_state.selected_node_id = s["id"]
-                    st.session_state.node_cache = {}
-                    st.rerun()
 
 
 # основной рендер вкладки
 def render_graph_tab():
-    st.markdown('<div class="main-header">Assembly Graph Visualization</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="main-header">Assembly Graph Visualization</div>',
+        unsafe_allow_html=True,
+    )
 
     if "graph_root" not in st.session_state:
         st.session_state.graph_root = None
@@ -361,7 +411,7 @@ def render_graph_tab():
     col_graph, col_side = st.columns([3, 1])
 
     with col_side:
-        root_query, max_depth = _render_controls()
+        _, _ = _render_controls()
         search_query = _render_search_and_hybrid()
         _render_maintenance()
 
