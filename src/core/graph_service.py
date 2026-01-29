@@ -60,6 +60,11 @@ class GraphService:
 
         nodes, edges = self._bfs_limited(full_graph, max_depth)
 
+        logger.info(
+            f"[Graph] build_graph material={material_id} depth={max_depth} "
+            f"nodes={len(nodes)} edges={len(edges)} time={time.time() - start_total:.3f}s"
+        )
+
         return {"nodes": nodes, "edges": edges}
 
     def rebuild_graph_cache(self):
@@ -70,9 +75,14 @@ class GraphService:
     # построение полного графа для одного material_id
     def _build_full_graph_for_material(self, material_id: str) -> Dict:
         with SessionLocal() as session:
-            rows = session.execute(select(ComponentDB)).scalars().all()
-
-        material_rows = [r for r in rows if r.material_id == material_id]
+            # ВАЖНО: грузим только нужный material_id, а не всю таблицу
+            material_rows = (
+                session.execute(
+                    select(ComponentDB).where(ComponentDB.material_id == material_id)
+                )
+                .scalars()
+                .all()
+            )
 
         if not material_rows:
             return {"nodes": {}, "children": {}, "roots": []}
@@ -80,7 +90,7 @@ class GraphService:
         nodes = {str(r.id): self._node_to_dict(r) for r in material_rows}
 
         children: Dict[str, List[str]] = {}
-        roots = []
+        roots: List[str] = []
 
         for r in material_rows:
             pid = str(r.parent_id) if r.parent_id is not None else None
@@ -91,17 +101,10 @@ class GraphService:
             else:
                 children.setdefault(pid, []).append(cid)
 
-        logger.info(f"[Graph][DEBUG] Material {material_id}: total nodes={len(nodes)}")
-        logger.info(f"[Graph][DEBUG] Roots: {roots}")
-
-        for pid, child_ids in children.items():
-            logger.info(f"[Graph][DEBUG] parent_id={pid} → children={child_ids}")
-
-        for nid, nd in nodes.items():
-            if nd.get("is_subassembly"):
-                logger.info(
-                    f"[Graph][DEBUG] SUBASSEMBLY {nid}: clean_name={nd.get('clean_name')}, children={children.get(nid)}"
-                )
+        logger.info(
+            f"[Graph] built full graph for material={material_id} "
+            f"nodes={len(nodes)} roots={len(roots)}"
+        )
 
         return {
             "nodes": nodes,
@@ -163,11 +166,9 @@ class GraphService:
             "path": r.path,
             "parent_id": r.parent_id,
             "usage_count": r.usage_count,
-
             "is_assembly": r.is_assembly,
             "is_subassembly": r.is_subassembly,
             "is_leaf": r.is_leaf,
-
             "material": r.material,
             "vendor": r.vendor,
             "size": r.size,

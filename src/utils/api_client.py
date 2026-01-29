@@ -102,8 +102,8 @@ def api_get_component(component_id: str | int):
     return r.json()
 
 
-def api_get_similar_components(component_id: int, limit: int = 10):
-    url = f"http://localhost:8000/cross-matching/{component_id}?top_k={limit}"
+def api_get_similar_components(component_id: int, limit: int = 10, same_level_only=False):
+    url = f"{API_URL}/cross-matching/{component_id}?top_k={limit}&same_level_only={str(same_level_only).lower()}"
     r = requests.get(url)
     r.raise_for_status()
     return r.json()

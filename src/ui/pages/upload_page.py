@@ -52,6 +52,9 @@ def edit_component_dialog():
         if r.status_code == 200:
             st.success("Updated successfully")
 
+            # сброс кэша таблицы
+            st.session_state.components_cache = {}
+
             manager: DataTableManager = st.session_state.table_manager
             offset = (manager.current_page - 1) * manager.page_size
             components = api_get_components(limit=manager.page_size, offset=offset)
@@ -74,6 +77,10 @@ def render_upload_tab():
 
     if "logs" not in st.session_state:
         st.session_state.logs = []
+
+    # инициализация кэша таблицы
+    if "components_cache" not in st.session_state:
+        st.session_state.components_cache = {}
 
     # состояние базы данных
     st.markdown('<div class="section-header">Current Database State</div>', unsafe_allow_html=True)
@@ -167,6 +174,9 @@ def render_upload_tab():
                 log(f"Graph rebuild failed: {e}")
                 return
 
+            # сброс кэша таблицы
+            st.session_state.components_cache = {}
+
             st.rerun()
 
         else:
@@ -184,8 +194,14 @@ def render_upload_tab():
     else:
         manager: DataTableManager = st.session_state.table_manager
         offset = (manager.current_page - 1) * manager.page_size
-        components_page = api_get_components(limit=manager.page_size, offset=offset)
-        table_df = pd.DataFrame(components_page)
+
+        cache_key = f"{offset}_{manager.page_size}"
+
+        if cache_key not in st.session_state.components_cache:
+            components_page = api_get_components(limit=manager.page_size, offset=offset)
+            st.session_state.components_cache[cache_key] = pd.DataFrame(components_page)
+
+        table_df = st.session_state.components_cache[cache_key]
         manager.set_data(table_df)
 
     manager: DataTableManager = st.session_state.table_manager
@@ -221,8 +237,13 @@ def render_upload_tab():
         manager.set_data(table_df)
     else:
         offset = (manager.current_page - 1) * manager.page_size
-        components_page = api_get_components(limit=manager.page_size, offset=offset)
-        table_df = pd.DataFrame(components_page)
+        cache_key = f"{offset}_{manager.page_size}"
+
+        if cache_key not in st.session_state.components_cache:
+            components_page = api_get_components(limit=manager.page_size, offset=offset)
+            st.session_state.components_cache[cache_key] = pd.DataFrame(components_page)
+
+        table_df = st.session_state.components_cache[cache_key]
         manager.set_data(table_df)
 
     page_data, _, total_items_local = manager.get_paged_data()
@@ -269,6 +290,9 @@ def render_upload_tab():
                         st.success(f"Deleted component {component_id}")
                     else:
                         st.error(f"Failed to delete component {component_id}")
+
+                # сброс кэша таблицы
+                st.session_state.components_cache = {}
 
                 offset = (manager.current_page - 1) * manager.page_size
                 components_page = api_get_components(limit=manager.page_size, offset=offset)

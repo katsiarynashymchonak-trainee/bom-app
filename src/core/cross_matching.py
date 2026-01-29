@@ -1,50 +1,47 @@
-# src/core/cross_matching.py
-
-from typing import Dict, Any, Optional, List
+from typing import Dict, List, Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
+from src.core.chroma_repository import ChromaRepository
 from src.db.database import SessionLocal
 from src.db.models import ComponentDB
-from src.core.chroma_repository import ChromaRepository
 from src.ml.embedding_service import EmbeddingService
 
 
-# Сервис поиска похожих компонентов по эмбеддингам
 class CrossMatchingService:
 
     def __init__(self):
         self.chroma = ChromaRepository.instance()
         self.embedder = EmbeddingService.instance()
 
-    # получение сессии БД
-    def _get_session(self) -> Session:
+    def _get_session(self):
         return SessionLocal()
 
-    # получение ORM объекта компонента
-    def _get_component(self, component_id: int) -> Optional[ComponentDB]:
+    def _get_component(self, component_id: int):
         with self._get_session() as session:
             return session.get(ComponentDB, component_id)
 
-    # основной метод поиска похожих компонентов
     def find_similar(
-        self,
-        component_id: int,
-        top_k: int = 10,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+            self,
+            component_id: int,
+            top_k: int = 10,
+            same_level_only: bool = False,
+    ) -> Dict[str, List[Dict[str, Any]]]:
 
         obj = self._get_component(component_id)
         if not obj or not obj.embedding_vector:
-            return []
+            return {
+                "same_assembly": [],
+                "other_assemblies": [],
+                "analogs": []
+            }
 
         query_emb = obj.embedding_vector
 
-        # запрашиваем много кандидатов чтобы хватило уникальных component_id
+        # Получаем большой пул кандидатов
         result = self.chroma.query(
             query_embedding=query_emb,
-            n_results=top_k * 1000,
+            n_results=5000,
             where=None,
         )
 
@@ -52,14 +49,18 @@ class CrossMatchingService:
         distances = result["distances"][0]
 
         if not ids:
-            return []
+            return {
+                "same_assembly": [],
+                "other_assemblies": [],
+                "analogs": []
+            }
 
-        # загрузка ORM объектов по unique_id
+        # Загружаем ORM объекты
         with self._get_session() as session:
             stmt = select(ComponentDB).where(ComponentDB.unique_id.in_(ids))
             rows = session.execute(stmt).scalars().all()
 
-        # сбор результатов
+        # Собираем результаты
         items = []
         for r in rows:
             if r.id == component_id:
@@ -78,25 +79,57 @@ class CrossMatchingService:
                 "size": r.size,
                 "standard": r.standard,
                 "abs_level": r.abs_level,
-                "is_assembly": r.is_assembly,
-                "is_subassembly": r.is_subassembly,
-                "is_leaf": r.is_leaf,
+                "path": r.path,
                 "similarity": similarity,
             })
 
-        # сортировка по similarity
+        # Сортировка по similarity
         items.sort(key=lambda x: x["similarity"], reverse=True)
 
-        # выбираем ровно top_k уникальных component_id
-        seen = set()
-        out = []
+        # Категоризация
+        same_assembly = []
+        other_assemblies = []
 
         for item in items:
-            cid = item["component_id"]
-            if cid not in seen:
-                seen.add(cid)
-                out.append(item)
-            if len(out) == top_k:
-                break
+            # Фильтр по уровню
+            if same_level_only and item["abs_level"] != obj.abs_level:
+                continue
 
-        return out
+            # Дубликаты в той же сборке
+            if item["component_id"] == obj.component_id and item["path"] == obj.path:
+                same_assembly.append(item)
+                continue
+
+            # Дубликаты в других сборках
+            if item["component_id"] == obj.component_id and item["path"] != obj.path:
+                other_assemblies.append(item)
+                continue
+
+        # Формируем список аналогов
+        analogs_raw = [
+            item for item in items
+            if item["clean_name"] != obj.clean_name
+        ]
+
+        # Убираем дубликаты по component_id
+        unique_ids = set()
+        analogs_unique = []
+
+        for item in analogs_raw:
+            cid = item["component_id"]
+            if cid not in unique_ids:
+                unique_ids.add(cid)
+                analogs_unique.append(item)
+
+        # Гарантируем минимум десять аналогов
+        analogs = analogs_unique[:max(10, top_k)]
+
+        # Ограничения
+        same_assembly = same_assembly[:top_k]
+        other_assemblies = other_assemblies[:top_k]
+
+        return {
+            "same_assembly": same_assembly,
+            "other_assemblies": other_assemblies,
+            "analogs": analogs
+        }
