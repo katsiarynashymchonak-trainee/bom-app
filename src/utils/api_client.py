@@ -134,4 +134,9 @@ def api_hybrid_search(
     r.raise_for_status()
     return r.json()
 
+def api_get_embeddings():
+    r = api_call("get", "/embeddings")
+    if r and r.status_code == 200:
+        return r.json()
+    return []
 
