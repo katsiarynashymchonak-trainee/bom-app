@@ -19,7 +19,7 @@ services:
 
   ui:
     build:
-      context: ../
+      context: ..
       dockerfile: docker/Dockerfile.ui
     image: bom-ui
     container_name: bom-ui
